@@ -84,7 +84,7 @@ void backtrack(std::vector<AssInfo>& asses,
                std::vector<int>& ass_order,
                std::vector<int>& ass_order_idxs,
                int backtrack_level) {
-    int keep = (backtrack_level == 0 ? 0 : ass_order_idxs[backtrack_level]);
+    int keep = ass_order_idxs[backtrack_level + 1];
 
     for (int i = (int)ass_order.size() - 1; i >= keep; i--) {
         int var = ass_order[i];
@@ -405,6 +405,7 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& formul
             std::vector<int> newClause = learn(ass_order, ass_order_idxs, assignment, conflict, formula, current_level);
             int backtrack_level = compute_backtrack_level(newClause, assignment);
 
+
             formula.push_back(newClause);
 
             // we have to change our watch pointers data structure to watch up to two things in this new clause
@@ -412,16 +413,12 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& formul
 
             int idx_0 = (abs(newClause[0]) * 2) + (newClause[0] < 0 ? 1 : 0);
 
-            if (newClause.size() == 1) {
-                watch_pointers[idx_0].push_back(new_clause_idx);
-            } else {
+            if (newClause.size() > 1) {
                 int idx_1 = (abs(newClause[1]) * 2) + (newClause[1] < 0 ? 1 : 0);
                 watch_pointers[idx_0].push_back(new_clause_idx);
                 watch_pointers[idx_1].push_back(new_clause_idx);
             }            
            
-
-
             backtrack(assignment, ass_order, ass_order_idxs, backtrack_level);
 
             current_level = backtrack_level;
@@ -445,43 +442,37 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& formul
 int main() {
     // 1. Define a tiny test problem
     // Let's use 3 variables: A=1, B=2, C=3
-    int num_variables = 12;
+    int num_variables = 30;
 
     // 2. Create the formula (CNF)
     // Clause 1: (A or B)       -> {1, 2}
     // Clause 2: (Not A or C)   -> {-1, 3}
     // Clause 3: (Not B or Not C) -> {-2, -3}
+
     std::vector<std::vector<int>> formula = {
-        {1, 2, 3},
-        {-1, 4},
-        {-2, 4},
-        {-3, 5},
-        {-4, 6},
-        {-5, 6},
-        {-6, 7},
-        {-6, 8},
-        {-7, 9},
-        {-8, 9},
-        {-9, 10},
-        {-10, 11},
-        {-11, 12},
 
-        {-1, -2},
-        {-2, -3},
-        {-4, -5},
-        {-7, -8},
+        // Each pigeon in at least one hole
+        {1,2,3,4,5},
+        {6,7,8,9,10},
+        {11,12,13,14,15},
+        {16,17,18,19,20},
+        {21,22,23,24,25},
+        {26,27,28,29,30},
 
-        {2, -4, 5},
-        {3, -5, 6},
-        {-3, 4, -6},
-        {-4, 7},
-        {-5, 8},
-        {-8, 10},
-        {-7, -9, 11},
-        {-10, 12},
+        // No pigeon in two holes
+        {-1,-2},{-1,-3},{-1,-4},{-1,-5},{-2,-3},{-2,-4},{-2,-5},{-3,-4},{-3,-5},{-4,-5},
+        {-6,-7},{-6,-8},{-6,-9},{-6,-10},{-7,-8},{-7,-9},{-7,-10},{-8,-9},{-8,-10},{-9,-10},
+        {-11,-12},{-11,-13},{-11,-14},{-11,-15},{-12,-13},{-12,-14},{-12,-15},{-13,-14},{-13,-15},{-14,-15},
+        {-16,-17},{-16,-18},{-16,-19},{-16,-20},{-17,-18},{-17,-19},{-17,-20},{-18,-19},{-18,-20},{-19,-20},
+        {-21,-22},{-21,-23},{-21,-24},{-21,-25},{-22,-23},{-22,-24},{-22,-25},{-23,-24},{-23,-25},{-24,-25},
+        {-26,-27},{-26,-28},{-26,-29},{-26,-30},{-27,-28},{-27,-29},{-27,-30},{-28,-29},{-28,-30},{-29,-30},
 
-        {1},
-        {-12}
+        // No two pigeons share a hole
+        {-1,-6},{-1,-11},{-1,-16},{-1,-21},{-1,-26},{-6,-11},{-6,-16},{-6,-21},{-6,-26},{-11,-16},{-11,-21},{-11,-26},{-16,-21},{-16,-26},{-21,-26},
+        {-2,-7},{-2,-12},{-2,-17},{-2,-22},{-2,-27},{-7,-12},{-7,-17},{-7,-22},{-7,-27},{-12,-17},{-12,-22},{-12,-27},{-17,-22},{-17,-27},{-22,-27},
+        {-3,-8},{-3,-13},{-3,-18},{-3,-23},{-3,-28},{-8,-13},{-8,-18},{-8,-23},{-8,-28},{-13,-18},{-13,-23},{-13,-28},{-18,-23},{-18,-28},{-23,-28},
+        {-4,-9},{-4,-14},{-4,-19},{-4,-24},{-4,-29},{-9,-14},{-9,-19},{-9,-24},{-9,-29},{-14,-19},{-14,-24},{-14,-29},{-19,-24},{-19,-29},{-24,-29},
+        {-5,-10},{-5,-15},{-5,-20},{-5,-25},{-5,-30},{-10,-15},{-10,-20},{-10,-25},{-10,-30},{-15,-20},{-15,-25},{-15,-30},{-20,-25},{-20,-30},{-25,-30}
     };
 
     std::cout << "Starting CDCL Solver..." << std::endl;
