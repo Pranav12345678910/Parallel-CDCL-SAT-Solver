@@ -7,8 +7,6 @@ using namespace std;
 #include <algorithm>
 #include <omp.h>
 #include <atomic>
-#include <fstream>
-#include <sstream>
 
 struct AssInfo {
     int ass; // -1, 0, 1
@@ -271,29 +269,6 @@ int UnitProp(std::vector<int>& ass_order, std::vector<std::vector<int>>& watch_p
 
 }
 
-void shuffle_levels(vector<int>& clause, vector<AssInfo>& assignment, int current_level) {
-
-    for (int i = 0; i < clause.size(); i++) {
-        int var = abs(clause[i]);
-        if (assignment[var].level == current_level) {
-            swap(clause[0], clause[i]);
-            break;
-        }
-    }
-    int highest_other_level = -1;
-    int best_index = 1;
-    for (int i = 1; i < clause.size(); i++) {
-        int var = abs(clause[i]);
-        if (assignment[var].level > highest_other_level) {
-            highest_other_level = assignment[var].level;
-            best_index = i;
-        }
-    }
-    swap(clause[1], clause[best_index]);
-
-}
-
-
 std::vector<int> learn(std::vector<int>& ass_order, std::vector<int>& ass_order_idx, std::vector<AssInfo>& assignment, int conflict, std::vector<std::vector<int>>& formula, int current_level) {
     std::vector<int> conflict_clause = formula[conflict];
 
@@ -304,57 +279,27 @@ std::vector<int> learn(std::vector<int>& ass_order, std::vector<int>& ass_order_
         conflict_clause = resolve(reason_clause, conflict_clause, var);
     }
 
-    if (conflict_clause.size() > 1) {    
-        shuffle_levels(conflict_clause, assignment, current_level);
+    if (conflict_clause.size() > 1) {
+        for (int i = 0; i < conflict_clause.size(); i++) {
+            int var = abs(conflict_clause[i]);
+            if (assignment[var].level == current_level) {
+                swap(conflict_clause[0], conflict_clause[i]);
+                break;
+            }
+        }
+        int highest_other_level = -1;
+        int best_index = 1;
+        for (int i = 1; i <     conflict_clause.size(); i++) {
+            int var = abs(conflict_clause[i]);
+            if (assignment[var].level > highest_other_level) {
+                highest_other_level = assignment[var].level;
+                best_index = i;
+            }
+        }
+        swap(conflict_clause[1], conflict_clause[best_index]);
     }
 
     return conflict_clause;
-}
-
-pair<int, int> score(int lit, vector<AssInfo>& assignment) {
-
-    int var = abs(lit);
-    int val = (lit > 0) ? 1 : -1;
-    int level = assignment[var].level;
-    pair<int, int> result;
-
-    if (assignment[var].ass == val) {
-        result = {2, 0};
-        return result; 
-    }
-    if (assignment[var].ass == 0) {
-        result = {1, 0};
-        return result; 
-    }
-    result = {0, level};
-    return result;
-
-
-}
-
-void sort_best_two(vector<int>& clause, vector<AssInfo>& assignment) {
-
-    pair<int, int> max_score = {0, 0};
-    int max_index;
-    for (int i = 0; i < clause.size(); i++) {
-        pair<int, int> new_score = score(clause[i], assignment);
-        if (new_score > max_score) {
-            max_score = new_score;
-            max_index = i;
-        }
-    }
-    swap(clause[0], clause[max_index]);
-    pair<int, int> next_max_score = {0, 0};
-    for (int i = 1; i < clause.size(); i++) {
-        pair<int, int> new_score = score(clause[i], assignment);
-        if (new_score > next_max_score) {
-            next_max_score = new_score;
-            max_index = i;
-        }
-    }
-    swap(clause[1], clause[max_index]);
-
-
 }
 
 std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_formula) {
@@ -377,6 +322,11 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
         }
     }
     // printf("%ld, %ld, %ld", val_heuristics.size(), var_heuristics.size(), heuristics.size());
+
+    for (const auto& [a, b] : heuristics) {
+        std::cout << "(" << a << ", " << b << "), ";
+    }
+    std::cout << "\n";
 
     std::vector<AssInfo> assignment(num_variables + 1, AssInfo{0, -1, -1, -1});
     std::vector<std::vector<int>> watch_pointers(num_variables * 2 + 2);
@@ -429,8 +379,8 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
         final_assignment = {};
     }
 
-    vector<pair<int, vector<int>>> buffer;
     int num_threads = omp_get_num_threads();
+    std::vector<std::vector<int>> buffer;
     std::vector<int> buffer_idxs(num_threads);
 
     #pragma omp parallel for schedule(static)
@@ -458,138 +408,67 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
 
         std::pair<std::string, std::string> heuristic = heuristics[i];
         int thread_num = omp_get_thread_num();
+        printf("thread_num: %d\n", thread_num);
+        printf("i: %d\n", i);
         std::string var_heuristic = heuristic.first;
         std::string val_heuristic = heuristic.second;
-        std::vector<std::vector<int>> inbox;
+        std::cout << "(" << var_heuristic << ", " << val_heuristic << ")\n";
 
         while (true) {
-            
-            // for each clause on buffer
-            //      if we just exported it, continue
-            //      figure out whether it is a conflict clause, unit, or true
-            //      if it is a conflict clause
-            //          reorder literals in clause accordingly
-            //          while conflict loop 
-            //      if it is a unit clause
-            //          reorder literals in clause accordingly
-            //          manually do unit propagation on first element
-            //      else:
-            //          reorder literals in clause accordingly
-            //          continue it will be naturally dealt with
-            //      add to formula
-            //      amend watch pointers data structure
-
-            bool skip_guess = false;
-
             int tid = omp_get_thread_num();
+            printf("hello: %ld\n", buffer.size());
             #pragma omp critical 
             {
                 for (int i = buffer_idxs[tid]; i < buffer.size(); i++) {
-                    if (buffer[i].first != tid) {   
-                        inbox.push_back(buffer[i].second);
-                    }
+                    printf("hello2\n");
+                    std::vector<int> newClause = buffer[i];
+                    formula.push_back(newClause);
+
+                    int new_clause_idx = formula.size() - 1;
+
+                    int idx_0 = (abs(newClause[0]) * 2) + (newClause[0] < 0 ? 1 : 0);
+
+                    if (newClause.size() > 1) {
+                        int idx_1 = (abs(newClause[1]) * 2) + (newClause[1] < 0 ? 1 : 0);
+                        watch_pointers_thread[idx_0].push_back(new_clause_idx);
+                        watch_pointers_thread[idx_1].push_back(new_clause_idx);
+                    }         
                 }
                 buffer_idxs[tid] = buffer.size();
             }
 
-            for (int i = 0; i < inbox.size(); i ++) {
-
-                std::vector<int> importedClause = inbox[i];
-                int new_clause_idx = formula.size();
-
-                // if we just exported it, continue
-
-                if (importedClause.size() == 1) {
-
-                    // manually do unit propagation 
-                    int var = abs(importedClause[0]);
-                    int value_to_sat = (importedClause[0] > 0) ? 1 : -1;
-                    assignment_thread[var].ass = value_to_sat;
-                    assignment_thread[var].level = current_level;
-                    assignment_thread[var].reason = new_clause_idx;
-
-                    ass_order_thread.push_back(var);
-
-                    continue;
-
-                }
-            
-                // figure out whether it is a conflict clause, unit, or true
-                sort_best_two(importedClause, assignment_thread);
-
-                int var1 = abs(importedClause[0]);
-                int value_to_sat1 = (importedClause[0] > 0) ? 1 : -1;
-                int var2 = abs(importedClause[1]);
-                int value_to_sat2 = (importedClause[1] > 0) ? 1 : -1;
-                        
-                bool is_conflict = (assignment_thread[var1].ass == -value_to_sat1);
-
-                // if it is a conflict clause 
-                if (is_conflict) {
-
-                    conflict = formula.size() - 1;
-                    skip_guess = true;
-                }
-
-                // if it is a unit clause
-                else if (assignment_thread[var1].ass == 0 && assignment_thread[var2].ass == -value_to_sat2) {
-
-                    // manually do unit propagation 
-                    int var = abs(importedClause[0]);
-                    int value_to_sat = (importedClause[0] > 0) ? 1 : -1;
-                    assignment_thread[var].ass = value_to_sat;
-                    assignment_thread[var].level = current_level;
-                    assignment_thread[var].reason = new_clause_idx;
-
-                    ass_order_thread.push_back(var);
-                }
-
-                formula.push_back(importedClause);
-            
-                int idx_0 = (abs(importedClause[0]) * 2) + (importedClause[0] < 0 ? 1 : 0);
-
-                if (importedClause.size() > 1) {
-                    int idx_1 = (abs(importedClause[1]) * 2) + (importedClause[1] < 0 ? 1 : 0);
-                    watch_pointers_thread[idx_0].push_back(new_clause_idx);
-                    watch_pointers_thread[idx_1].push_back(new_clause_idx);
-                }         
-
-                if (is_conflict) {
-                    break;
-                }
-            }            
-
-            if (!skip_guess) {
-                
-                current_level++;
-                int l;
-                if (var_heuristic == "simple") {
-                    l = simple_var(assignment_thread, current_level, ass_order_thread, ass_order_idxs_thread);
-                } else if (var_heuristic == "vsids") { 
-                    l = vsids_var(assignment_thread, current_level, ass_order_thread, ass_order_idxs_thread, activity);
-                }
-
-                if (l == 0) {
-                    // std::vector<bool> final_assignment(num_variables + 1);
-                    #pragma omp critical 
-                    {
-                        for (int i = 1; i <= num_variables; i++) {
-                            final_assignment[i] = (assignment_thread[i].ass == 1);
-                        }
-                        sol.store(true);
-                    }
-                    break;
-                } 
-
-                if (val_heuristic == "random") {
-                    random_val(assignment_thread[l]);
-                } else if (val_heuristic == "phase") {
-                    phase_val(assignment_thread[l]);
-                } 
-
-                conflict = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
+            current_level++;
+            int l;
+            if (var_heuristic == "simple") {
+                l = simple_var(assignment_thread, current_level, ass_order_thread, ass_order_idxs_thread);
+            } else if (var_heuristic == "vsids") {
+                l = vsids_var(assignment_thread, current_level, ass_order_thread, ass_order_idxs_thread, activity);
             }
 
+            if (l == 0) {
+                // std::vector<bool> final_assignment(num_variables + 1);
+                #pragma omp critical 
+                {
+                    for (int i = 1; i <= num_variables; i++) {
+                        final_assignment[i] = (assignment_thread[i].ass == 1);
+                    }
+                    sol.store(true);
+                    printf("\nHELLO\n");
+                    printf("thread_num: %d\n", thread_num);
+                    printf("i: %d\n", i);
+                }
+                break;
+            } 
+
+            if (val_heuristic == "random") {
+                random_val(assignment_thread[l]);
+            } else if (val_heuristic == "phase") {
+                phase_val(assignment_thread[l]);
+            } 
+
+            conflict = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead);
+
+            // incorporate l into our assignment            
             while (conflict != -1) {
 
                 // this is better than checking if newClause is empty after cause it's more efficient
@@ -598,6 +477,9 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                     #pragma omp critical 
                     {
                         sol.store(true);
+                        printf("\nHELLO\n");
+                        printf("thread_num: %d\n", thread_num);
+                        printf("i: %d\n", i);
                         final_assignment = {};
                     }
                     break;
@@ -606,12 +488,15 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                 std::vector<int> newClause = learn(ass_order_thread, ass_order_idxs_thread, assignment_thread, conflict, formula, current_level);
                 int backtrack_level = compute_backtrack_level(newClause, assignment_thread);
 
-
                 formula.push_back(newClause);
-                
-                #pragma omp critical
+                printf("HELLLLLLLLO\n");
+
+                #pragma omp critical 
                 {
-                    buffer.push_back({tid, newClause});
+                    buffer.push_back(newClause);
+                    printf("SIZE: %ld\n", buffer.size());
+                    // int min_idx = std::min_element(buffer_idxs.begin(), buffer_idxs.end());
+                    // buffer.erase(buffer.begin(), buffer.begin() + min_idx);
                 }
 
                 // we have to change our watch pointers data structure to watch up to two things in this new clause
@@ -628,7 +513,7 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                 backtrack(assignment_thread, ass_order_thread, ass_order_idxs_thread, backtrack_level);
 
                 current_level = backtrack_level;
-                qhead_thread = ass_order_thread.size();
+                qhead = ass_order_thread.size();
 
                 // assume newClause[0] is unassigned
                 int value_to_sat = (newClause[0] > 0) ? 1 : -1;
@@ -637,12 +522,9 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                 assignment_thread[new_var].level = current_level;
                 assignment_thread[new_var].reason = new_clause_idx;
                 assignment_thread[new_var].saved = value_to_sat;
-                ass_order_thread.push_back(new_var);
-                conflict = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
+                ass_order.push_back(new_var);
+                conflict = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead);
             }
-
-
-
             if (sol.load()) break;
         }
         if (sol.load()) continue;
@@ -651,57 +533,36 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
 }
 
 
-// this function has AI generated code
-void read_formula_from_file(const std::string& path,
-                            int& num_variables,
-                            std::vector<std::vector<int>>& formula) {
-
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        std::cerr << "Error: could not open file " << path << std::endl;
-        exit(1);
-    }
-
-    std::string line;
-
-    // First line: number of variables
-    std::getline(file, line);
-    num_variables = std::stoi(line);
-
-    // Remaining lines: clauses
-    while (std::getline(file, line)) {
-        if (line.empty()) continue;
-
-        std::stringstream ss(line);
-        std::vector<int> clause;
-        int lit;
-
-        while (ss >> lit) {
-            clause.push_back(lit);
-        }
-
-        if (!clause.empty()) {
-            formula.push_back(clause);
-        }
-    }
-
-    file.close();
-}
-
-
-// this function has AI generated code
-int main(int argc, char* argv[]) {
+int main() {
     // 1. Define a tiny test problem
     // Let's use 3 variables: A=1, B=2, C=3
-    int num_variables;
-    std::vector<std::vector<int>> formula;
+    int num_variables = 10;
 
-    if (argc < 2) {
-        std::cerr << "Usage: ./solver <input_file>\n";
-        return 1;
-    }
+    std::vector<std::vector<int>> formula = {
+        {1,2,3},
+        {4,5,6},
+        {7,8,9},
+        {1,4,7},
+        {2,5,8},
+        {3,6,9},
 
-    read_formula_from_file(argv[1], num_variables, formula);
+        {-1,-2},
+        {-2,-3},
+        {-1,-3},
+
+        {-4,-5},
+        {-5,-6},
+        {-4,-6},
+
+        {-7,-8},
+        {-8,-9},
+        {-7,-9},
+
+        {10},
+        {-10,1,4,7},
+        {-10,2,5,8},
+        {-10,3,6,9}
+    };
 
     omp_set_num_threads(2);
 
@@ -723,3 +584,4 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
+
