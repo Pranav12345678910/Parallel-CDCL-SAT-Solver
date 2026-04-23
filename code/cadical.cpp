@@ -18,7 +18,7 @@ struct AssInfo {
 };
 
 void random_val(AssInfo& asss) {
-    static std::mt19937 gen(std::random_device{}());
+    static std::mt19937 gen(32);
     std::bernoulli_distribution d(0.5);
 
     asss.ass = d(gen) ? 1 : -1;
