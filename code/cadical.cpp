@@ -432,8 +432,19 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
     int num_threads = omp_get_max_threads();
     vector<int> buffer_idxs(num_threads);
 
+    vector<tuple<string, float, float>> active_heuristics;
+    if (num_threads == 16) {
+        active_heuristics = heuristics;
+    }   
+    else {
+        int stride = 16 / num_threads;
+        for (int i = 0; i < num_threads; i++) {
+            active_heuristics.push_back(heuristics[(i * stride) % 16]);
+        }
+    }
+
     #pragma omp parallel for schedule(static)
-    for (int i = 0; i < heuristics.size(); i++) {
+    for (int i = 0; i < active_heuristics.size(); i++) {
         if (sol.load()) continue;
 
         vector<vector<int>> formula = og_formula;
@@ -456,11 +467,11 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
 
         vector<double> activity(num_variables + 1, 0.0);
 
-        tuple<string, float, float> heuristic = heuristics[i];
+        tuple<string, float, float> heuristic = active_heuristics[i];
         int thread_num = omp_get_thread_num();
         string val = get<0>(heuristic);
         float thread_decay = get<1>(heuristic);
-        float epsilon = get<2>(heuristic);
+        float epsilon = get<2>(heuristic);  
 
         while (true) {
             
@@ -739,7 +750,7 @@ int main(int argc, char* argv[]) {
 
     read_formula_from_file(argv[1], num_variables, formula);
 
-    omp_set_num_threads(8);
+    omp_set_num_threads(1);
 
     cout << "Starting CDCL Solver..." << endl;
 
