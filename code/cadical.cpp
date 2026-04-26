@@ -9,6 +9,9 @@ using namespace std;
 #include <atomic>
 #include <fstream>
 #include <sstream>
+#include <tuple>
+#include <chrono>
+
 
 struct AssInfo {
     int ass; // -1, 0, 1
@@ -18,54 +21,57 @@ struct AssInfo {
 };
 
 void random_val(AssInfo& asss) {
-    static std::mt19937 gen(32);
-    std::bernoulli_distribution d(0.5);
+    static mt19937 gen(32);
+    bernoulli_distribution d(0.5);
 
     asss.ass = d(gen) ? 1 : -1;
 }
 
-void phase_val(AssInfo& asss) {
-    asss.ass = asss.saved;
-}
-
-int simple_var(std::vector<AssInfo>& asses, int current_level, std::vector<int>& ass_order, std::vector<int>& ass_order_idxs) {
-    int idx = 0;
-    for (int i = 1; i < asses.size(); i++) {
-        if (asses[i].ass == 0) {
-            asses[i].level = current_level;
-            asses[i].reason = -1;
-            ass_order_idxs.push_back(ass_order.size());
-            ass_order.push_back(i);
-            idx = i;
-            break;
-        }
-    }
-    return idx;
-}
-
-int vsids_var(std::vector<AssInfo>& asses, int current_level, std::vector<int>& ass_order, std::vector<int>& ass_order_idxs, const std::vector<double>& activity) {
+int vsids_var(vector<AssInfo>& asses, int current_level, vector<int>& ass_order, vector<int>& ass_order_idxs, const vector<double>& activity, double epsilon, int thread_id) {
+    
+    // based on epsilon parameter, possibly ignore chosen variable
+    thread_local mt19937 gen(397 + thread_id);
+    uniform_real_distribution<double> epsilon_thing(0.0, 1.0);
     int best_var = 0;
+
+    vector<int> unassigned;
+
+    // get best variable
     double best_score = -1.0;
 
     for (int v = 1; v < asses.size(); v++) {
-        if (asses[v].ass == 0 && activity[v] > best_score) {
-            best_score = activity[v];
-            best_var = v;
+        if (asses[v].ass == 0) {
+            unassigned.push_back(v);
+            if (activity[v] > best_score) {
+                best_score = activity[v];
+                best_var = v;
+            }
         }
     }
 
     if (best_var == 0) return 0;
 
-    asses[best_var].level = current_level;
-    asses[best_var].reason = -1;
-    ass_order_idxs.push_back((int)ass_order.size());
-    ass_order.push_back(best_var);
+    int chosen_var;
 
-    return best_var;
+    if (epsilon_thing(gen) < epsilon) {
+        // random
+        uniform_int_distribution<int> random_var(0, unassigned.size() - 1);
+        chosen_var = unassigned[random_var(gen)];
+    }
+    else {
+        chosen_var = best_var;
+    }
+
+    asses[chosen_var].level = current_level;
+    asses[chosen_var].reason = -1;
+    ass_order_idxs.push_back((int)ass_order.size());
+    ass_order.push_back(chosen_var);
+
+    return chosen_var;
 }
 
-int compute_backtrack_level(const std::vector<int>& clause,
-                            const std::vector<AssInfo>& ass) {
+int compute_backtrack_level(const vector<int>& clause,
+                            const vector<AssInfo>& ass) {
     int highest = -1;
     int second = -1;
 
@@ -81,12 +87,12 @@ int compute_backtrack_level(const std::vector<int>& clause,
         }
     }
 
-    return std::max(0, second);
+    return max(0, second);
 }
 
-void backtrack(std::vector<AssInfo>& asses,
-               std::vector<int>& ass_order,
-               std::vector<int>& ass_order_idxs,
+void backtrack(vector<AssInfo>& asses,
+               vector<int>& ass_order,
+               vector<int>& ass_order_idxs,
                int backtrack_level) {
     int keep = ass_order_idxs[backtrack_level + 1];
 
@@ -101,8 +107,8 @@ void backtrack(std::vector<AssInfo>& asses,
     ass_order_idxs.resize(backtrack_level + 1);
 }
 
-int count_current_level_literals(const std::vector<int>& clause,
-                                 const std::vector<AssInfo>& assignment,
+int count_current_level_literals(const vector<int>& clause,
+                                 const vector<AssInfo>& assignment,
                                  int current_level) {
     int count = 0;
     for (int lit : clause) {
@@ -114,8 +120,8 @@ int count_current_level_literals(const std::vector<int>& clause,
     return count;
 }
 
-int find_current_level_implied_literal(const std::vector<int>& clause,
-                                       const std::vector<AssInfo>& assignment,
+int find_current_level_implied_literal(const vector<int>& clause,
+                                       const vector<AssInfo>& assignment,
                                        int current_level) {
     for (int lit : clause) {
         int var = abs(lit);
@@ -127,17 +133,17 @@ int find_current_level_implied_literal(const std::vector<int>& clause,
     return 0;
 }
 
-bool is_tautology(const std::vector<int>& clause) {
+bool is_tautology(const vector<int>& clause) {
     for (int lit : clause) {
-        if (std::find(clause.begin(), clause.end(), -lit) != clause.end()) {
+        if (find(clause.begin(), clause.end(), -lit) != clause.end()) {
             return true;
         }
     }
     return false;
 }
 
-std::vector<int> resolve(std::vector<int>& c1, std::vector<int>& c2, int var) {
-    std::vector<int> res;
+vector<int> resolve(vector<int>& c1, vector<int>& c2, int var) {
+    vector<int> res;
 
     for (int i = 0; i < c1.size(); i++) {
         int lit = c1[i];
@@ -154,17 +160,17 @@ std::vector<int> resolve(std::vector<int>& c1, std::vector<int>& c2, int var) {
     }
 
     if (is_tautology(res)) {
-        std::cerr << "Tautological resolvent produced\n";
+        cerr << "Tautological resolvent produced\n";
         exit(1);
     }
 
     return res;
 }
 
-int find_latest_current_level_implied_literal(const std::vector<int>& clause,
-                                              const std::vector<int>& ass_order,
-                                              const std::vector<int>& ass_order_idx,
-                                              const std::vector<AssInfo>& assignment,
+int find_latest_current_level_implied_literal(const vector<int>& clause,
+                                              const vector<int>& ass_order,
+                                              const vector<int>& ass_order_idx,
+                                              const vector<AssInfo>& assignment,
                                               int current_level) {
     int idx = ass_order_idx[current_level];
     for (int i = (int)ass_order.size() - 1; i >= idx; i--) {
@@ -180,8 +186,8 @@ int find_latest_current_level_implied_literal(const std::vector<int>& clause,
     return 0;
 }
 
-int UnitProp(std::vector<int>& ass_order, std::vector<std::vector<int>>& watch_pointers, 
-             std::vector<std::vector<int>>& formula, std::vector<AssInfo>& assignment, int current_level, int &qhead) {
+int UnitProp(vector<int>& ass_order, vector<vector<int>>& watch_pointers, 
+             vector<vector<int>>& formula, vector<AssInfo>& assignment, int current_level, int &qhead) {
 
     
 
@@ -194,7 +200,7 @@ int UnitProp(std::vector<int>& ass_order, std::vector<std::vector<int>>& watch_p
         int val = assignment[var].ass;
         int lit = -(var * val);
         int idx = (abs(lit) * 2) + (lit < 0 ? 1 : 0);
-        std::vector<int>& watches = watch_pointers[idx];
+        vector<int>& watches = watch_pointers[idx];
 
         int i = 0;
         int j = 0;
@@ -203,7 +209,7 @@ int UnitProp(std::vector<int>& ass_order, std::vector<std::vector<int>>& watch_p
         while (i < watches.size()) {
 
             int clause_idx = watches[i];
-            std::vector<int>& current_clause = formula[clause_idx];
+            vector<int>& current_clause = formula[clause_idx];
             if (current_clause[0] == lit) {
                 swap(current_clause[0], current_clause[1]);
             }
@@ -256,6 +262,7 @@ int UnitProp(std::vector<int>& ass_order, std::vector<std::vector<int>>& watch_p
                     assignment[var2].ass = value_to_sat;
                     assignment[var2].level = current_level;
                     assignment[var2].reason = clause_idx;
+                    assignment[var2].saved = value_to_sat;
                     ass_order.push_back(var2); 
                 }
             }
@@ -269,46 +276,6 @@ int UnitProp(std::vector<int>& ass_order, std::vector<std::vector<int>>& watch_p
     return -1;
 
 
-}
-
-void shuffle_levels(vector<int>& clause, vector<AssInfo>& assignment, int current_level) {
-
-    for (int i = 0; i < clause.size(); i++) {
-        int var = abs(clause[i]);
-        if (assignment[var].level == current_level) {
-            swap(clause[0], clause[i]);
-            break;
-        }
-    }
-    int highest_other_level = -1;
-    int best_index = 1;
-    for (int i = 1; i < clause.size(); i++) {
-        int var = abs(clause[i]);
-        if (assignment[var].level > highest_other_level) {
-            highest_other_level = assignment[var].level;
-            best_index = i;
-        }
-    }
-    swap(clause[1], clause[best_index]);
-
-}
-
-
-std::vector<int> learn(std::vector<int>& ass_order, std::vector<int>& ass_order_idx, std::vector<AssInfo>& assignment, int conflict, std::vector<std::vector<int>>& formula, int current_level) {
-    std::vector<int> conflict_clause = formula[conflict];
-
-    while (count_current_level_literals(conflict_clause, assignment, current_level) > 1) {
-        int var = find_latest_current_level_implied_literal(conflict_clause, ass_order, ass_order_idx, assignment, current_level);
-        AssInfo assInfo = assignment[var];
-        std::vector<int> reason_clause = formula[assInfo.reason];
-        conflict_clause = resolve(reason_clause, conflict_clause, var);
-    }
-
-    if (conflict_clause.size() > 1) {    
-        shuffle_levels(conflict_clause, assignment, current_level);
-    }
-
-    return conflict_clause;
 }
 
 pair<int, int> score(int lit, vector<AssInfo>& assignment) {
@@ -334,7 +301,11 @@ pair<int, int> score(int lit, vector<AssInfo>& assignment) {
 
 void sort_best_two(vector<int>& clause, vector<AssInfo>& assignment) {
 
-    pair<int, int> max_score = {0, 0};
+    if (clause.size() == 1) {
+        return;
+    }
+
+    pair<int, int> max_score = {-1, -1};
     int max_index;
     for (int i = 0; i < clause.size(); i++) {
         pair<int, int> new_score = score(clause[i], assignment);
@@ -344,45 +315,73 @@ void sort_best_two(vector<int>& clause, vector<AssInfo>& assignment) {
         }
     }
     swap(clause[0], clause[max_index]);
-    pair<int, int> next_max_score = {0, 0};
+    int next_max_index = 1;
+    pair<int, int> next_max_score = {-1, -1};
     for (int i = 1; i < clause.size(); i++) {
         pair<int, int> new_score = score(clause[i], assignment);
         if (new_score > next_max_score) {
             next_max_score = new_score;
-            max_index = i;
+            next_max_index = i;
         }
     }
-    swap(clause[1], clause[max_index]);
+    swap(clause[1], clause[next_max_index]);
 
 
 }
 
-std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_formula) {
+
+vector<int> learn(vector<int>& ass_order, vector<int>& ass_order_idx, vector<AssInfo>& assignment, int conflict, vector<vector<int>>& formula, int current_level) {
+    vector<int> conflict_clause = formula[conflict];
+
+    int back = 0;
+    int anchor_level = 0;
+    for (int lit : conflict_clause) {
+        anchor_level = max(anchor_level, assignment[abs(lit)].level);
+    }
+
+    while (count_current_level_literals(conflict_clause, assignment, anchor_level) > 1) {
+        int var = find_latest_current_level_implied_literal(conflict_clause, ass_order, ass_order_idx, assignment, anchor_level);
+        AssInfo assInfo = assignment[var];
+
+        vector<int> reason_clause = formula[assInfo.reason];
+        conflict_clause = resolve(reason_clause, conflict_clause, var);
+    }
+
+    sort_best_two(conflict_clause, assignment);
+
+    return conflict_clause;
+}
+
+vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
     // -1 means false, 1 means true, 0 means unassigned
-    // std::vector<int> assignment(num_variables + 1, 0);
+    // vector<int> assignment(num_variables + 1, 0);
 
     // watch pointers list. for each literal, list of clause indices watching it
     
-    std::atomic<bool> sol(false);
+    atomic<bool> sol(false);
 
-    std::vector<std::string> val_heuristics = {"random"};
-    std::vector<std::string> var_heuristics = {"simple", "vsids"};
+    // 16 separate possibilities for VSIDS parameters
+    vector<string> val_heuristics = {"phase", "anti-phase"};
+    vector<float> decay = {0.75f, 0.95f};
+    vector<float> epsilon = {0.01f, 0.02f, 0.03f, 0.05f};
 
-    std::vector<bool> final_assignment(num_variables + 1);
+    vector<bool> final_assignment(num_variables + 1);
 
-    std::vector<std::pair<std::string, std::string>> heuristics;
-    for (const auto& val : val_heuristics) {
-        for (const auto& var : var_heuristics) {
-            heuristics.emplace_back(var, val);
+    vector<tuple<string, float, float>> heuristics;
+    for (int i = 0; i < 2; i++) {
+        for (int j = 0; j < 2; j++) {
+            for (int k = 0; k < 4; k++) {
+                tuple<string, float, float> new_heuristic = {val_heuristics[i], decay[j], epsilon[k]};
+                heuristics.push_back(new_heuristic);
+            }
         }
     }
-    // printf("%ld, %ld, %ld", val_heuristics.size(), var_heuristics.size(), heuristics.size());
+    
+    vector<AssInfo> assignment(num_variables + 1, AssInfo{0, -1, -1, -1});
+    vector<vector<int>> watch_pointers(num_variables * 2 + 2);
 
-    std::vector<AssInfo> assignment(num_variables + 1, AssInfo{0, -1, -1, -1});
-    std::vector<std::vector<int>> watch_pointers(num_variables * 2 + 2);
-
-    std::vector<int> ass_order;
-    std::vector<int> ass_order_idxs;
+    vector<int> ass_order;
+    vector<int> ass_order_idxs;
     ass_order_idxs.push_back(0);
 
     for (int i = 0; i < og_formula.size(); i ++) {
@@ -430,37 +429,38 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
     }
 
     vector<pair<int, vector<int>>> buffer;
-    int num_threads = omp_get_num_threads();
-    std::vector<int> buffer_idxs(num_threads);
+    int num_threads = omp_get_max_threads();
+    vector<int> buffer_idxs(num_threads);
 
     #pragma omp parallel for schedule(static)
     for (int i = 0; i < heuristics.size(); i++) {
         if (sol.load()) continue;
 
-        std::vector<std::vector<int>> formula = og_formula;
-        std::vector<std::vector<int>> watch_pointers_thread = watch_pointers;
+        vector<vector<int>> formula = og_formula;
+        vector<vector<int>> watch_pointers_thread = watch_pointers;
 
         // indicates clause that, through unit propagation, led to each variables assignment
-        // std::vector<int> reason(num_variables + 1, -1);   
+        // vector<int> reason(num_variables + 1, -1);   
 
         // we need to know how each variable got assigned to do backtracking 
-        // std::vector<int> level(num_variables + 1, -1);  
+        // vector<int> level(num_variables + 1, -1);  
 
-        std::vector<int> ass_order_thread = ass_order;
-        std::vector<int> ass_order_idxs_thread = ass_order_idxs;
+        vector<int> ass_order_thread = ass_order;
+        vector<int> ass_order_idxs_thread = ass_order_idxs;
+        int conflict_thread = conflict;
 
-        std::vector<AssInfo> assignment_thread = assignment;
+        vector<AssInfo> assignment_thread = assignment;
 
         int current_level = 0;
         int qhead_thread = qhead;
 
-        std::vector<double> activity(num_variables + 1, 0.0);
+        vector<double> activity(num_variables + 1, 0.0);
 
-        std::pair<std::string, std::string> heuristic = heuristics[i];
+        tuple<string, float, float> heuristic = heuristics[i];
         int thread_num = omp_get_thread_num();
-        std::string var_heuristic = heuristic.first;
-        std::string val_heuristic = heuristic.second;
-        std::vector<std::vector<int>> inbox;
+        string val = get<0>(heuristic);
+        float thread_decay = get<1>(heuristic);
+        float epsilon = get<2>(heuristic);
 
         while (true) {
             
@@ -479,23 +479,34 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
             //      add to formula
             //      amend watch pointers data structure
 
+            vector<vector<int>> inbox;
             bool skip_guess = false;
 
             int tid = omp_get_thread_num();
             #pragma omp critical 
             {
+    
                 for (int i = buffer_idxs[tid]; i < buffer.size(); i++) {
                     if (buffer[i].first != tid) {   
                         inbox.push_back(buffer[i].second);
                     }
                 }
+
                 buffer_idxs[tid] = buffer.size();
+
+                // if it gets big just wipe it so we don't get an OOM error
+                // the threads definitely will already have processed these clauses by now
+                if (buffer.size() > 50000) {
+                    buffer.clear();    
+                    buffer_idxs[tid] = 0; 
+                }
             }
 
             for (int i = 0; i < inbox.size(); i ++) {
 
-                std::vector<int> importedClause = inbox[i];
+                vector<int> importedClause = inbox[i];
                 int new_clause_idx = formula.size();
+                bool is_conflict;
 
                 // if we just exported it, continue
 
@@ -504,14 +515,25 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                     // manually do unit propagation 
                     int var = abs(importedClause[0]);
                     int value_to_sat = (importedClause[0] > 0) ? 1 : -1;
-                    assignment_thread[var].ass = value_to_sat;
-                    assignment_thread[var].level = current_level;
-                    assignment_thread[var].reason = new_clause_idx;
 
-                    ass_order_thread.push_back(var);
+                    if (assignment_thread[var].ass == 0) {
+                        assignment_thread[var].ass = value_to_sat;
+                        assignment_thread[var].level = current_level;
+                        assignment_thread[var].reason = new_clause_idx;
+                        assignment_thread[var].saved = value_to_sat;
+                        ass_order_thread.push_back(var);
+                    }
+                    else if (assignment_thread[var].ass == -value_to_sat) {
+                        // trigger conflict
+                        is_conflict = true;
+                        conflict_thread = formula.size();
+                        skip_guess = true;
+                        formula.push_back(importedClause);
+                        break;
+                    }
 
+                    formula.push_back(importedClause);
                     continue;
-
                 }
             
                 // figure out whether it is a conflict clause, unit, or true
@@ -522,12 +544,11 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                 int var2 = abs(importedClause[1]);
                 int value_to_sat2 = (importedClause[1] > 0) ? 1 : -1;
                         
-                bool is_conflict = (assignment_thread[var1].ass == -value_to_sat1);
+                is_conflict = (assignment_thread[var1].ass == -value_to_sat1);
 
                 // if it is a conflict clause 
                 if (is_conflict) {
-
-                    conflict = formula.size() - 1;
+                    conflict_thread = formula.size();
                     skip_guess = true;
                 }
 
@@ -540,6 +561,7 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                     assignment_thread[var].ass = value_to_sat;
                     assignment_thread[var].level = current_level;
                     assignment_thread[var].reason = new_clause_idx;
+                    assignment_thread[var].saved = value_to_sat;
 
                     ass_order_thread.push_back(var);
                 }
@@ -558,19 +580,22 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                     break;
                 }
             }            
+            
+            // before incrementing the level, unit prop any assignments caused by the mailbox loop
+            if (!skip_guess && qhead_thread < ass_order_thread.size()) {
+                conflict_thread = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
+                if (conflict_thread != -1) {
+                    // conflict occurred
+                    skip_guess = true;
+                }
+            }
 
             if (!skip_guess) {
                 
                 current_level++;
-                int l;
-                if (var_heuristic == "simple") {
-                    l = simple_var(assignment_thread, current_level, ass_order_thread, ass_order_idxs_thread);
-                } else if (var_heuristic == "vsids") { 
-                    l = vsids_var(assignment_thread, current_level, ass_order_thread, ass_order_idxs_thread, activity);
-                }
+                int l = vsids_var(assignment_thread, current_level, ass_order_thread, ass_order_idxs_thread, activity, epsilon, tid);
 
                 if (l == 0) {
-                    // std::vector<bool> final_assignment(num_variables + 1);
                     #pragma omp critical 
                     {
                         for (int i = 1; i <= num_variables; i++) {
@@ -581,16 +606,19 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                     break;
                 } 
 
-                if (val_heuristic == "random") {
-                    random_val(assignment_thread[l]);
-                } else if (val_heuristic == "phase") {
-                    phase_val(assignment_thread[l]);
+                int saved;
+                if (val == "phase") {
+                    saved = assignment_thread[l].saved;
+                    assignment_thread[l].ass = (saved == 0) ? -1 : saved;
+                } else if (val == "anti-phase") {
+                    saved = assignment_thread[l].saved;
+                    assignment_thread[l].ass = (saved == 0) ? 1 : -saved;
                 } 
 
-                conflict = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
+                conflict_thread = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
             }
 
-            while (conflict != -1) {
+            while (conflict_thread != -1) {
 
                 // this is better than checking if newClause is empty after cause it's more efficient
 
@@ -603,8 +631,16 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                     break;
                 }
 
-                std::vector<int> newClause = learn(ass_order_thread, ass_order_idxs_thread, assignment_thread, conflict, formula, current_level);
+                vector<int> newClause = learn(ass_order_thread, ass_order_idxs_thread, assignment_thread, conflict_thread, formula, current_level);
                 int backtrack_level = compute_backtrack_level(newClause, assignment_thread);
+
+                for (int lit : newClause) {
+                    activity[abs(lit)] += 1.0;
+                }
+
+                for (int v = 1; v <= num_variables; v++) {
+                    activity[v] *= thread_decay;
+                }
 
 
                 formula.push_back(newClause);
@@ -638,7 +674,7 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
                 assignment_thread[new_var].reason = new_clause_idx;
                 assignment_thread[new_var].saved = value_to_sat;
                 ass_order_thread.push_back(new_var);
-                conflict = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
+                conflict_thread = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
             }
 
 
@@ -652,28 +688,28 @@ std::vector<bool> solve(int num_variables, std::vector<std::vector<int>>& og_for
 
 
 // this function has AI generated code
-void read_formula_from_file(const std::string& path,
+void read_formula_from_file(const string& path,
                             int& num_variables,
-                            std::vector<std::vector<int>>& formula) {
+                            vector<vector<int>>& formula) {
 
-    std::ifstream file(path);
+    ifstream file(path);
     if (!file.is_open()) {
-        std::cerr << "Error: could not open file " << path << std::endl;
+        cerr << "Error: could not open file " << path << endl;
         exit(1);
     }
 
-    std::string line;
+    string line;
 
     // First line: number of variables
-    std::getline(file, line);
-    num_variables = std::stoi(line);
+    getline(file, line);
+    num_variables = stoi(line);
 
     // Remaining lines: clauses
-    while (std::getline(file, line)) {
+    while (getline(file, line)) {
         if (line.empty()) continue;
 
-        std::stringstream ss(line);
-        std::vector<int> clause;
+        stringstream ss(line);
+        vector<int> clause;
         int lit;
 
         while (ss >> lit) {
@@ -694,30 +730,37 @@ int main(int argc, char* argv[]) {
     // 1. Define a tiny test problem
     // Let's use 3 variables: A=1, B=2, C=3
     int num_variables;
-    std::vector<std::vector<int>> formula;
+    vector<vector<int>> formula;
 
     if (argc < 2) {
-        std::cerr << "Usage: ./solver <input_file>\n";
+        cerr << "Usage: ./solver <input_file>\n";
         return 1;
     }
 
     read_formula_from_file(argv[1], num_variables, formula);
 
-    omp_set_num_threads(2);
+    omp_set_num_threads(8);
 
-    std::cout << "Starting CDCL Solver..." << std::endl;
+    cout << "Starting CDCL Solver..." << endl;
 
-    std::vector<bool> result = solve(num_variables, formula);
+    auto start = std::chrono::high_resolution_clock::now();
+
+    vector<bool> result = solve(num_variables, formula);
+
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+
+    std::cout << "Execution time: " << duration.count() << " microseconds" << std::endl;
 
     if (result.empty()) {
-        std::cout << "\nResult: UNSATISFIABLE" << std::endl;
+        cout << "\nResult: UNSATISFIABLE" << endl;
     } else {
-        std::cout << "\nResult: SATISFIABLE!" << std::endl;
-        std::cout << "Assignment:" << std::endl;
+        cout << "\nResult: SATISFIABLE!" << endl;
+        cout << "Assignment:" << endl;
         
         for (int i = 1; i <= num_variables; i++) {
-            std::cout << "Var " << i << " = " 
-                      << (result[i] ? "True (1)" : "False (-1)") << std::endl;
+            cout << "Var " << i << " = " 
+                      << (result[i] ? "True (1)" : "False (-1)") << endl;
         }
     }
 
