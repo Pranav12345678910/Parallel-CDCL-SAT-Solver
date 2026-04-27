@@ -133,61 +133,109 @@ int find_current_level_implied_literal(const vector<int>& clause,
     return 0;
 }
 
-bool is_tautology(const vector<int>& clause) {
+bool is_tautology(const vector<int>& clause, int num_variables) {
+
+    static thread_local vector<bool> pos_vars(num_variables + 1, false);
+    static thread_local vector<bool> neg_vars(num_variables + 1, false);
+
     for (int lit : clause) {
-        if (find(clause.begin(), clause.end(), -lit) != clause.end()) {
-            return true;
+        // mark appropriate index in either pos_vars or neg_vars
+        int var = abs(lit);
+        if (lit < 0) {
+            pos_vars[var] = 1;
+            if (neg_vars[var] == 1) {
+                return true;
+            }
+        }
+        else {
+            neg_vars[var] = 1;
+            if (pos_vars[var] == 1) {
+                return true;
+            }
         }
     }
+
+    for (int lit : clause) {
+        pos_vars[abs(lit)] = false;
+        neg_vars[abs(lit)] = false;
+    }
+
     return false;
 }
 
-vector<int> resolve(vector<int>& c1, vector<int>& c2, int var) {
+void add_lit(int lit, int var, vector<bool>& seen_pos, vector<bool>& seen_neg, vector<int>& res) {
+    if (abs(lit) == var) return; 
+        
+        int v = abs(lit);
+        if (lit > 0) {
+            if (!seen_pos[v]) {
+                seen_pos[v] = true;
+                res.push_back(lit);
+            }
+        } else {
+            if (!seen_neg[v]) {
+                seen_neg[v] = true;
+                res.push_back(lit);
+            }
+        }
+}
+
+vector<int> resolve(vector<int>& c1, vector<int>& c2, int var, int num_variables) {
+
     vector<int> res;
-
-    for (int i = 0; i < c1.size(); i++) {
-        int lit = c1[i];
-        if (find(res.begin(), res.end(), lit) == res.end() && abs(lit) != var) {
-            res.push_back(lit);
-        }
+    res.reserve(c1.size() + c2.size());
+    static thread_local vector<bool> seen_pos(num_variables + 1, false);
+    static thread_local vector<bool> seen_neg(num_variables + 1, false);
+    
+    for (int lit : c1) {
+        add_lit(lit, var, seen_pos, seen_neg, res);
     }
 
-    for (int i = 0; i < c2.size(); i++) {
-        int lit = c2[i];
-        if (find(res.begin(), res.end(), lit) == res.end() && abs(lit) != var) {
-            res.push_back(lit);
-        }
+    for (int lit : c2) {
+        add_lit(lit, var, seen_pos, seen_neg, res);
     }
 
-    if (is_tautology(res)) {
-        cerr << "Tautological resolvent produced\n";
-        exit(1);
+    for (int lit : res) {
+        int v = abs(lit);
+        seen_pos[v] = false;
+        seen_neg[v] = false;
     }
 
     return res;
 }
 
+// finds variable closest to where we take elements off the queue that was assigned by the passed in clause
 int find_latest_current_level_implied_literal(const vector<int>& clause,
                                               const vector<int>& ass_order,
                                               const vector<int>& ass_order_idx,
                                               const vector<AssInfo>& assignment,
                                               int current_level) {
+
+    static thread_local vector<bool> present_vars(assignment.size(), false);
+    for (int lit : clause) {
+        present_vars[abs(lit)] = true;
+    }
+
+    int result = 0;
     int idx = ass_order_idx[current_level];
     for (int i = (int)ass_order.size() - 1; i >= idx; i--) {
         int var = ass_order[i];
         if (assignment[var].level == current_level && assignment[var].reason > -1) {
-            for (int lit : clause) {
-                if (abs(lit) == var) {
-                    return var;
-                }
+            if (present_vars[var]) {
+                result = var;
+                break;
             }
         }
     }
-    return 0;
+
+    for (int lit : clause) {
+        present_vars[abs(lit)] = false;
+    }
+    return result;
 }
 
 int UnitProp(vector<int>& ass_order, vector<vector<int>>& watch_pointers, 
-             vector<vector<int>>& formula, vector<AssInfo>& assignment, int current_level, int &qhead) {
+             vector<vector<int>>& formula, vector<AssInfo>& assignment, int current_level, int &qhead, vector<bool>& clause_delete) {
 
     
 
@@ -209,6 +257,13 @@ int UnitProp(vector<int>& ass_order, vector<vector<int>>& watch_pointers,
         while (i < watches.size()) {
 
             int clause_idx = watches[i];
+
+            // skip all watch pointer and propagation logic if the clause is deleted
+            if (clause_delete[clause_idx]) {
+                i++;
+                continue;
+            }
+
             vector<int>& current_clause = formula[clause_idx];
             if (current_clause[0] == lit) {
                 swap(current_clause[0], current_clause[1]);
@@ -330,7 +385,7 @@ void sort_best_two(vector<int>& clause, vector<AssInfo>& assignment) {
 }
 
 
-vector<int> learn(vector<int>& ass_order, vector<int>& ass_order_idx, vector<AssInfo>& assignment, int conflict, vector<vector<int>>& formula, int current_level) {
+vector<int> learn(vector<int>& ass_order, vector<int>& ass_order_idx, vector<AssInfo>& assignment, int conflict, vector<vector<int>>& formula, int current_level, int num_variables) {
     vector<int> conflict_clause = formula[conflict];
 
     int back = 0;
@@ -344,7 +399,7 @@ vector<int> learn(vector<int>& ass_order, vector<int>& ass_order_idx, vector<Ass
         AssInfo assInfo = assignment[var];
 
         vector<int> reason_clause = formula[assInfo.reason];
-        conflict_clause = resolve(reason_clause, conflict_clause, var);
+        conflict_clause = resolve(reason_clause, conflict_clause, var, num_variables);
     }
 
     sort_best_two(conflict_clause, assignment);
@@ -421,7 +476,9 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
 
     int qhead = 0;
 
-    int conflict = UnitProp(ass_order, watch_pointers, og_formula, assignment, 0, qhead);
+    vector<bool> clause_delete_temp(og_formula.size(), false);
+
+    int conflict = UnitProp(ass_order, watch_pointers, og_formula, assignment, 0, qhead, clause_delete_temp);
 
     if (conflict != -1) {
         sol.store(true);
@@ -472,6 +529,10 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
         string val = get<0>(heuristic);
         float thread_decay = get<1>(heuristic);
         float epsilon = get<2>(heuristic);  
+
+        int conflicts = 0;
+        int initial_size = formula.size();
+        vector<bool> clause_delete(formula.size(), false);
 
         while (true) {
             
@@ -540,10 +601,12 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
                         conflict_thread = formula.size();
                         skip_guess = true;
                         formula.push_back(importedClause);
+                        clause_delete.push_back(false);
                         break;
                     }
 
                     formula.push_back(importedClause);
+                    clause_delete.push_back(false);
                     continue;
                 }
             
@@ -578,6 +641,7 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
                 }
 
                 formula.push_back(importedClause);
+                clause_delete.push_back(false);
             
                 int idx_0 = (abs(importedClause[0]) * 2) + (importedClause[0] < 0 ? 1 : 0);
 
@@ -594,7 +658,7 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
             
             // before incrementing the level, unit prop any assignments caused by the mailbox loop
             if (!skip_guess && qhead_thread < ass_order_thread.size()) {
-                conflict_thread = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
+                conflict_thread = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread, clause_delete);
                 if (conflict_thread != -1) {
                     // conflict occurred
                     skip_guess = true;
@@ -626,11 +690,13 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
                     assignment_thread[l].ass = (saved == 0) ? 1 : -saved;
                 } 
 
-                conflict_thread = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
+                conflict_thread = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread, clause_delete);
             }
 
             while (conflict_thread != -1) {
 
+                conflicts++;
+                
                 // this is better than checking if newClause is empty after cause it's more efficient
 
                 if (current_level == 0) {
@@ -642,7 +708,7 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
                     break;
                 }
 
-                vector<int> newClause = learn(ass_order_thread, ass_order_idxs_thread, assignment_thread, conflict_thread, formula, current_level);
+                vector<int> newClause = learn(ass_order_thread, ass_order_idxs_thread, assignment_thread, conflict_thread, formula, current_level, num_variables);
                 int backtrack_level = compute_backtrack_level(newClause, assignment_thread);
 
                 for (int lit : newClause) {
@@ -655,10 +721,13 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
 
 
                 formula.push_back(newClause);
-                
-                #pragma omp critical
-                {
-                    buffer.push_back({tid, newClause});
+                clause_delete.push_back(false);
+
+                if (newClause.size() <= 8) {
+                    #pragma omp critical
+                    {
+                        buffer.push_back({tid, newClause});
+                    }
                 }
 
                 // we have to change our watch pointers data structure to watch up to two things in this new clause
@@ -685,7 +754,28 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
                 assignment_thread[new_var].reason = new_clause_idx;
                 assignment_thread[new_var].saved = value_to_sat;
                 ass_order_thread.push_back(new_var);
-                conflict_thread = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread);
+                conflict_thread = UnitProp(ass_order_thread, watch_pointers_thread, formula, assignment_thread, current_level, qhead_thread, clause_delete);
+
+                if (conflicts >= 2000 && formula.size() > 15000) {
+                    
+                    conflicts = 0;
+                    vector<bool> active(formula.size(), false);
+
+                    // set a clause's index in active to false if it is the reason for a variable's assignment
+                    for (int v = 1; v <= num_variables; v++) {
+                        if (assignment_thread[v].ass != 0 && assignment_thread[v].reason != -1) {  
+                            active[assignment_thread[v].reason] = true;
+                        }
+                    }
+
+                    for (int c = initial_size; c < formula.size(); c++) {
+                        if (!active[c] && formula[c].size() > 8) {
+                            clause_delete[c] = true;
+                        }
+                    }
+
+                }
+
             }
 
 
@@ -750,7 +840,7 @@ int main(int argc, char* argv[]) {
 
     read_formula_from_file(argv[1], num_variables, formula);
 
-    omp_set_num_threads(1);
+    omp_set_num_threads(8);
 
     cout << "Starting CDCL Solver..." << endl;
 
