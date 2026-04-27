@@ -1,0 +1,18 @@
+filename,num_variables,num_clauses,expected,description
+random3sat_150v_640c_seed1.txt,150,640,UNKNOWN,random 3-SAT near phase transition/benchmark seed=1
+random3sat_180v_770c_seed2.txt,180,770,UNKNOWN,random 3-SAT near phase transition/benchmark seed=2
+random3sat_220v_940c_seed3.txt,220,940,UNKNOWN,random 3-SAT near phase transition/benchmark seed=3
+random3sat_260v_1110c_seed4.txt,260,1110,UNKNOWN,random 3-SAT near phase transition/benchmark seed=4
+mixed_random_180v_900c_seed10.txt,180,900,UNKNOWN,mixed random CNF clause lengths seed=10
+mixed_random_250v_1300c_seed11.txt,250,1300,UNKNOWN,mixed random CNF clause lengths seed=11
+mixed_random_320v_1700c_seed12.txt,320,1700,UNKNOWN,mixed random CNF clause lengths seed=12
+planted_mixed_220v_1100c_seed20.txt,220,1100,SAT,planted SAT mixed lengths seed=20
+planted_mixed_300v_1600c_seed21.txt,300,1600,SAT,planted SAT mixed lengths seed=21
+planted_mixed_400v_2200c_seed22.txt,400,2200,SAT,planted SAT mixed lengths seed=22
+coloring_70nodes_4colors_p18_seed30.txt,280,2254,UNKNOWN,graph coloring 70 nodes 4 colors edge_prob=0.18 seed=30
+coloring_90nodes_4colors_p16_seed31.txt,360,3086,UNKNOWN,graph coloring 90 nodes 4 colors edge_prob=0.16 seed=31
+coloring_unsat_80nodes_4colors_clique5_seed32.txt,320,2108,UNSAT,graph coloring 80 nodes 4 colors edge_prob=0.12 seed=32
+xor_sat_120v_180eq_k4_seed40.txt,120,1440,SAT,XOR parity encoded to CNF k=4 eqs=180 seed=40
+xor_unsat_120v_180eq_k4_seed41.txt,120,1448,UNSAT,XOR parity encoded to CNF k=4 eqs=180 seed=41
+xor_sat_180v_260eq_k4_seed42.txt,180,2080,SAT,XOR parity encoded to CNF k=4 eqs=260 seed=42
+xor_unsat_180v_260eq_k4_seed43.txt,180,2088,UNSAT,XOR parity encoded to CNF k=4 eqs=260 seed=43

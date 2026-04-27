@@ -20,6 +20,11 @@ struct AssInfo {
     int saved;
 };
 
+struct Watcher {
+    int clause_idx;
+    int other_watched;
+};
+
 void random_val(AssInfo& asss) {
     static mt19937 gen(32);
     bernoulli_distribution d(0.5);
@@ -234,7 +239,7 @@ int find_latest_current_level_implied_literal(const vector<int>& clause,
     return result;
 }
 
-int UnitProp(vector<int>& ass_order, vector<vector<int>>& watch_pointers, 
+int UnitProp(vector<int>& ass_order, vector<vector<Watcher>>& watch_pointers, 
              vector<vector<int>>& formula, vector<AssInfo>& assignment, int current_level, int &qhead, vector<bool>& clause_delete) {
 
     
@@ -248,7 +253,7 @@ int UnitProp(vector<int>& ass_order, vector<vector<int>>& watch_pointers,
         int val = assignment[var].ass;
         int lit = -(var * val);
         int idx = (abs(lit) * 2) + (lit < 0 ? 1 : 0);
-        vector<int>& watches = watch_pointers[idx];
+        vector<Watcher>& watches = watch_pointers[idx];
 
         int i = 0;
         int j = 0;
@@ -256,10 +261,21 @@ int UnitProp(vector<int>& ass_order, vector<vector<int>>& watch_pointers,
         // iterate through the clauses watching this literal
         while (i < watches.size()) {
 
-            int clause_idx = watches[i];
+            Watcher w = watches[i];
+            int other_watched = w.other_watched;
+            int other_watched_value_to_sat = (other_watched > 0) ? 1 : -1;
+            int clause_idx = w.clause_idx;  
 
             // skip all watch pointer and propagation logic if the clause is deleted
             if (clause_delete[clause_idx]) {
+                i++;
+                continue;
+            }
+
+            if (assignment[abs(other_watched)].ass == other_watched_value_to_sat) {
+                // we know the clause is satisfied, so there is no need to modify its watch pointers
+                watches[j] = watches[i];
+                j++;
                 i++;
                 continue;
             }
@@ -273,14 +289,6 @@ int UnitProp(vector<int>& ass_order, vector<vector<int>>& watch_pointers,
             int var2 = abs(current_clause[0]);
             int value_to_sat = (current_clause[0] > 0) ? 1 : -1;
 
-            if (assignment[var2].ass == value_to_sat) {
-                // we know the clause is satisfied, so there is no need to modify its watch pointers
-                watches[j] = watches[i];
-                j++;
-                i++;
-                continue;
-            }
-
             // we want to swap the one we know is false (current_clause[1]) with some other one that isn't 
             bool found_new_watch = false;
             for (int index = 2; index < current_clause.size(); index ++) {
@@ -289,7 +297,10 @@ int UnitProp(vector<int>& ass_order, vector<vector<int>>& watch_pointers,
                 if (assignment[var2].ass != -value_to_sat) {
                     swap(current_clause[1], current_clause[index]);
                     int watch_list_idx = (abs(current_clause[1]) * 2) + (current_clause[1] < 0 ? 1 : 0);
-                    watch_pointers[watch_list_idx].push_back(clause_idx);
+                    Watcher w2;
+                    w2.clause_idx = clause_idx;
+                    w2.other_watched = current_clause[0];
+                    watch_pointers[watch_list_idx].push_back(w2);
                     found_new_watch = true;
                     i++;
                     break;
@@ -433,7 +444,7 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
     }
     
     vector<AssInfo> assignment(num_variables + 1, AssInfo{0, -1, -1, -1});
-    vector<vector<int>> watch_pointers(num_variables * 2 + 2);
+    vector<vector<Watcher>> watch_pointers(num_variables * 2 + 2);
 
     vector<int> ass_order;
     vector<int> ass_order_idxs;
@@ -449,8 +460,14 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
             int lit1 = og_formula[i][1];
             int watch_list_idx_0 = abs(lit0 * 2) + (lit0 < 0 ? 1 : 0);
             int watch_list_idx_1 = abs(lit1 * 2) + (lit1 < 0 ? 1 : 0);
-            watch_pointers[watch_list_idx_0].push_back(i);
-            watch_pointers[watch_list_idx_1].push_back(i);
+            Watcher w1; 
+            w1.clause_idx = i;
+            w1.other_watched = lit1;
+            Watcher w2; 
+            w2.clause_idx = i;
+            w2.other_watched = lit0;
+            watch_pointers[watch_list_idx_0].push_back(w1);
+            watch_pointers[watch_list_idx_1].push_back(w2);
         }
         else if (og_formula[i].size() == 1) {
             int lit = og_formula[i][0];
@@ -505,7 +522,7 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
         if (sol.load()) continue;
 
         vector<vector<int>> formula = og_formula;
-        vector<vector<int>> watch_pointers_thread = watch_pointers;
+        vector<vector<Watcher>> watch_pointers_thread = watch_pointers;
 
         // indicates clause that, through unit propagation, led to each variables assignment
         // vector<int> reason(num_variables + 1, -1);   
@@ -533,6 +550,7 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
         int conflicts = 0;
         int initial_size = formula.size();
         vector<bool> clause_delete(formula.size(), false);
+        int buffer_idx = 0;
 
         while (true) {
             
@@ -558,20 +576,14 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
             #pragma omp critical 
             {
     
-                for (int i = buffer_idxs[tid]; i < buffer.size(); i++) {
+                for (int i = buffer_idx; i < buffer.size(); i++) {
                     if (buffer[i].first != tid) {   
                         inbox.push_back(buffer[i].second);
                     }
                 }
 
-                buffer_idxs[tid] = buffer.size();
+                buffer_idx = buffer.size();
 
-                // if it gets big just wipe it so we don't get an OOM error
-                // the threads definitely will already have processed these clauses by now
-                if (buffer.size() > 50000) {
-                    buffer.clear();    
-                    buffer_idxs[tid] = 0; 
-                }
             }
 
             for (int i = 0; i < inbox.size(); i ++) {
@@ -647,8 +659,14 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
 
                 if (importedClause.size() > 1) {
                     int idx_1 = (abs(importedClause[1]) * 2) + (importedClause[1] < 0 ? 1 : 0);
-                    watch_pointers_thread[idx_0].push_back(new_clause_idx);
-                    watch_pointers_thread[idx_1].push_back(new_clause_idx);
+                    Watcher w1;
+                    w1.clause_idx = new_clause_idx;
+                    w1.other_watched = importedClause[1];
+                    Watcher w2;
+                    w2.clause_idx = new_clause_idx;
+                    w2.other_watched = importedClause[0];
+                    watch_pointers_thread[idx_0].push_back(w1);
+                    watch_pointers_thread[idx_1].push_back(w2);
                 }         
 
                 if (is_conflict) {
@@ -737,8 +755,14 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
 
                 if (newClause.size() > 1) {
                     int idx_1 = (abs(newClause[1]) * 2) + (newClause[1] < 0 ? 1 : 0);
-                    watch_pointers_thread[idx_0].push_back(new_clause_idx);
-                    watch_pointers_thread[idx_1].push_back(new_clause_idx);
+                    Watcher w1;
+                    w1.clause_idx = new_clause_idx;
+                    w1.other_watched = newClause[1];
+                    Watcher w2;
+                    w2.clause_idx = new_clause_idx;
+                    w2.other_watched = newClause[0];
+                    watch_pointers_thread[idx_0].push_back(w1);
+                    watch_pointers_thread[idx_1].push_back(w2);
                 }            
             
                 backtrack(assignment_thread, ass_order_thread, ass_order_idxs_thread, backtrack_level);
@@ -840,7 +864,7 @@ int main(int argc, char* argv[]) {
 
     read_formula_from_file(argv[1], num_variables, formula);
 
-    omp_set_num_threads(8);
+    omp_set_num_threads(1);
 
     cout << "Starting CDCL Solver..." << endl;
 
