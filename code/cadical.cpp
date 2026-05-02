@@ -812,7 +812,6 @@ vector<bool> solve(int num_variables, vector<vector<int>>& og_formula) {
 }
 
 
-// this function has AI generated code
 void read_formula_from_file(const string& path,
                             int& num_variables,
                             vector<vector<int>>& formula) {
@@ -825,11 +824,9 @@ void read_formula_from_file(const string& path,
 
     string line;
 
-    // First line: number of variables
     getline(file, line);
     num_variables = stoi(line);
 
-    // Remaining lines: clauses
     while (getline(file, line)) {
         if (line.empty()) continue;
 
@@ -850,10 +847,8 @@ void read_formula_from_file(const string& path,
 }
 
 
-// this function has AI generated code
 int main(int argc, char* argv[]) {
-    // 1. Define a tiny test problem
-    // Let's use 3 variables: A=1, B=2, C=3
+   
     int num_variables;
     vector<vector<int>> formula;
 
